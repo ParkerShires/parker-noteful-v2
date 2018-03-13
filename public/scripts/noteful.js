@@ -47,6 +47,7 @@ const noteful = (function () {
       api.details(`/v2/notes/${noteId}`)
         .then((response) => {
           store.currentNote = response;
+          console.log(store);
           render();
         });
     });
