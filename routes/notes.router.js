@@ -2,6 +2,7 @@
 
 const express = require('express');
 
+const knex = require('../knex');
 // Create an router instance (aka "mini-app")
 const router = express.Router();
 
@@ -40,6 +41,8 @@ router.get('/notes/:id', (req, res, next) => {
     })
     .catch(err => next(err));
   */
+
+
 });
 
 /* ========== PUT/UPDATE A SINGLE ITEM ========== */
