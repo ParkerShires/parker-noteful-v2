@@ -6,6 +6,8 @@ const knex = require('../knex');
 // Create an router instance (aka "mini-app")
 const router = express.Router();
 
+const hydrateNotes = require('../utils/hydrateNotes');
+
 // TEMP: Simple In-Memory Database
 /* 
 const data = require('../db/notes');
@@ -16,15 +18,22 @@ const notes = simDB.initialize(data);
 // Get All (and search by query)
 /* ========== GET/READ ALL NOTES ========== */
 router.get('/notes', (req, res, next) => {
-  const { searchTerm } = req.query;
-  knex.select('id', 'title', 'content')
+  const { searchTerm, folderId } = req.query;
+  knex.select('notes.id', 'title', 'content', 'folders.id as folder_id', 'folders.name as folderName')
     .from('notes')
+    .leftJoin('folders', 'notes.folder_id', 'folders.id')
     // .where('title', 'like', `%${searchTerm}%`)
     .where(function () {
       if (searchTerm) {
         this.where('title', 'like', `%${searchTerm}%`)
       }
     })
+    .where(function () {
+      if (folderId) {
+        this.where('folder_id', folderId);
+      }
+    })
+    .orderBy('notes.id')
     .then(list => {
   res.json(list);
 })
@@ -44,17 +53,18 @@ router.get('/notes', (req, res, next) => {
 router.get('/notes/:id', (req, res, next) => {
   const noteId = req.params.id;
 
-  knex.first('id', 'title', 'content')
+  knex.select('notes.id', 'title', 'content', 'folders.id as folder_id', 'folders.name as folderName')
     .from('notes')
-    .where({id: noteId})
-    .then(item => {
-      console.log(item);
-    if (item) {
-      res.json(item);
-  } else {
-      next();
-  }
-  })
+    .leftJoin('folders', 'notes.folder_id', 'folders.id')
+    .where(function() {
+      if (noteId) {
+        this.where({id: noteId});
+      }
+    })
+    .orderBy('notes.id')
+    .then(result => {
+      res.json(result);
+    })
     .catch(err => next(err));
 
   /*
@@ -77,7 +87,7 @@ router.put('/notes/:id', (req, res, next) => {
   const noteId = req.params.id;
   /***** Never trust users - validate input *****/
   const updateObj = {};
-  const updateableFields = ['title', 'content'];
+  const updateableFields = ['title', 'content', 'folder_id'];
 
   updateableFields.forEach(field => {
     if (field in req.body) {
@@ -93,10 +103,13 @@ router.put('/notes/:id', (req, res, next) => {
   }
 
   knex('notes')
+    .update(updateObj)
     .where({id: noteId})
-    .update({
-      title: updateObj.title,
-      content: updateObj.content
+    .then(noteId => {
+      return knex.select('notes.id', 'title', 'content', 'folder_id', 'folders.name as folder_name')
+      .from('notes')
+      .leftJoin('folders', 'notes.folder_id', 'folders.id')
+      .where('notes.id', noteId);
     })
     .then(item => {
       if (item) {
@@ -124,24 +137,23 @@ router.put('/notes/:id', (req, res, next) => {
 router.post('/notes', (req, res, next) => {
   const { title, content } = req.body;
   
-  const newItem = { title, content };
+  const newItem = { title, content, folder_id };
   /***** Never trust users - validate input *****/
-  if (!newItem.title) {
-    const err = new Error('Missing `title` in request body');
-    err.status = 400;
-    return next(err);
-  }
 
-  knex('notes')
-    .insert({
-      title: newItem.title,
-      content: newItem.content
+  let noteId;
+  knex.insert(newItem)
+    .into('notes')
+    .returning('id')
+    .then(([id]) => {
+      noteId = id;
+      return knex.select('notes.id', 'title', 'content', 'folder_id', 'folders.name as folder_name')
+        .from('notes')
+        .leftJoin('folders', 'notes.folder_id', 'folders.id')
+        .where('notes.id', noteId);
     })
-    .then(item => {
-      if (item) {
-        res.location(`http://${req.headers.host}/notes/${item.id}`).status(201).json(item);
-    } 
-  })
+    .then(([result]) => {
+      res.location(`${req.originalUrl}/${result.id}`).status(201).json(result);
+    })
     .catch(err => next(err));
 
   /*
@@ -158,7 +170,8 @@ router.post('/notes', (req, res, next) => {
 /* ========== DELETE/REMOVE A SINGLE ITEM ========== */
 router.delete('/notes/:id', (req, res, next) => {
   const id = req.params.id;
-  knex('notes')
+  knex.select('id', 'title', 'content')
+    .from('notes')
     .where({id,})
     .del()
     .then(count => {
